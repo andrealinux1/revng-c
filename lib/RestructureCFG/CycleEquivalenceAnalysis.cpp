@@ -2,6 +2,10 @@
 // Copyright rev.ng Labs Srl. See LICENSE.md for details.
 //
 
+// IVAN: include directives here
+#pragma clang optimize off
+// #include "llvm/IR/DataLayout.h"
+
 #include <iterator>
 #include <limits>
 #include <map>
@@ -174,6 +178,19 @@ void CycleEquivalenceAnalysis<GraphT, GT>::computeDFSAndSpanningTree(BlockGraph
     const auto FindCurrentNode = [&CurrentNode](const auto &Pair) {
       return Pair.Neighbor == CurrentNode;
     };
+
+    ChildrenEdgesRange = llvm::children_edges<UndirectedGraphT>(SourceNode);
+
+    // IVAN: the following invocation, works only when compiling this compile
+    // unit with `#pragma clang optimize off`, if the pragma is commented away
+    // (do it on top of the file), it is like the range `ChildrenEdgesRange`
+    // becomes empty. An additional interesting thing to do, is to include the
+    // `llvm/IR/DataLayout.h` header (I've put it commented at the beginning of
+    // the file), to get a compilation error telling us that we are trying to
+    // return temporary iterators from the `GenericGraph` `Undirected`
+    // GraphTraits. I suggest then to take a look in the `revng` repo, in the
+    // `GenericGraph` file for the `IVAN:` comment, in order to understand
+    // better what we will try to investigate.
     auto EdgeIt = llvm::find_if(ChildrenEdgesRange, FindCurrentNode);
     revng_assert(EdgeIt != ChildrenEdgesRange.end());
     EdgeIt->Label->setType(SpanningTreeEdgeKind::TreeEdge);
