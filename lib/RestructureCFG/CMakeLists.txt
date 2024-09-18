@@ -15,6 +15,7 @@ revng_add_analyses_library(
   GenericRegionInfo.cpp
   GenericRegionPass.cpp
   InlineDispatcherSwitch.cpp
+  InlineDivergentBranchesPass.cpp
   MetaRegion.cpp
   PromoteCallNoReturn.cpp
   RegionCFGTree.cpp
