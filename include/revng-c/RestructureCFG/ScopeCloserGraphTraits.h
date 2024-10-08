@@ -7,6 +7,8 @@
 #include "llvm/ADT/GraphTraits.h"
 #include "llvm/IR/BasicBlock.h"
 
+#include "revng-c/RestructureCFG/GeneratorIterator.h"
+
 namespace llvm {
 
 /// This class is used as a marker class to tell the graph iterator to treat the
@@ -39,38 +41,11 @@ public:
 
 public:
   static auto child_begin(NodeRef N) {
-
-    // TODO: here we need to implement the concatenation of the standard
-    ///      successors with the successor represented in the `ScopeCloser`
-    ///      marker, if present
-    // return successors(N).begin();
-    // return successors(N)
-    // return successors(N).begin()
-    /*
-    SCMBuilder
-    NodeRef ScopeCloserTarget =
-    */
-
-    // ScopeCloserMarkerBuilder SCMBuilder(N->getParent());
-    // NodeRef ScopeCloserTarget = SCMBuilder.getScopeCloserTarget(N);
-    // return llvm::concat<NodeRef>(successors(N), { ScopeCloserTarget
-    // }).begin();
-    // return llvm::concat<NodeRef>(successors(N), { N }).begin();
-    return successors(N).begin();
+    return GeneratorIterator<llvm::BasicBlock *>(increment(N));
   }
 
   static auto child_end(NodeRef N) {
-
-    // TODO: here we need to implement the concatenation of the standard
-    //       successors with the successor represented in the `ScopeCloser`
-    //       marker, if present
-    // return successors(N).end();
-
-    // ScopeCloserMarkerBuilder SCMBuilder(N->getParent());
-    // NodeRef ScopeCloserTarget = SCMBuilder.getScopeCloserTarget(N);
-    // return llvm::concat<NodeRef>(successors(N), { ScopeCloserTarget }).end();
-    // return llvm::concat<NodeRef>(successors(N), { N }).end();
-    return successors(N).end();
+    return GeneratorIterator<llvm::BasicBlock *>();
   }
 
   // In the implementation for `llvm::BasicBlock *` trait we simply return

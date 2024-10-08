@@ -36,6 +36,7 @@ public:
       }
     }
 
+    // Test iteration which uses `llvm::depth_first` on the `llvm::Dashed` graph
     llvm::BasicBlock *EntryBlock = &F.getEntryBlock();
     for (llvm::BasicBlock *BB : llvm::depth_first(llvm::Dashed(EntryBlock))) {
       dbg << "Block " << BB->getName().str() << " scope graph successors:\n";
@@ -43,8 +44,18 @@ public:
 
       for (auto Succ = ScopeGraph::child_begin(BB);
            Succ != ScopeGraph::child_end(BB);
-           Succ++) {
-        dbg << "  " << Succ->getName().str() << "\n";
+           ++Succ) {
+        dbg << "  " << (*Succ)->getName().str() << "\n";
+      }
+    }
+
+    for (llvm::BasicBlock &BB : F) {
+      dbg << "Block " << BB.getName().str() << " scope graph successors:\n";
+      using ScopeGraph = llvm::GraphTraits<llvm::Dashed<llvm::BasicBlock *>>;
+      for (auto Succ = ScopeGraph::child_begin(&BB);
+           Succ != ScopeGraph::child_end(&BB);
+           ++Succ) {
+        dbg << " " << (*Succ)->getName().str() << "\n";
       }
     }
   }
