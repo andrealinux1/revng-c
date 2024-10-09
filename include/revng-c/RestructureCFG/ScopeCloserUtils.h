@@ -25,6 +25,10 @@ class ScopeCloserMarkerBuilder {
 private:
   llvm::BasicBlock *BB;
 
+  // TODO: it would be nice if the pointer to the `ScopeCloserMarkerFunction`
+  //       would stored locally in this builder, or retrieved through the
+  //       `FunctionTag` machinery provided by `revng`, instead of having a
+  //       global object like now
   // llvm::Function *ScopeCloserMarkerFunction;
 
 public:
@@ -61,20 +65,22 @@ public:
     // We must have an insertion point
     revng_assert(BB);
 
-    // Find the last but one instruction, were the marker containing the target
-    // BasicBlock is stored
-    auto BBIt = BB->end();
-    auto TerminatorIt = BBIt->getPrevNode();
-    auto MarkerIt = TerminatorIt->getPrevNode();
+    // Find the last but one instruction, where the marker containing the target
+    // `BasicBlockAddress` is stored
+    auto BBIt = BB->rbegin();
+    ++BBIt;
 
-    if (auto *MarkerCall = llvm::dyn_cast<llvm::CallInst>(MarkerIt)) {
-      if (MarkerCall->getCalledFunction() == ScopeCloserMarkerFunction) {
-        llvm::BlockAddress *ScopeCloserBlockAddress = llvm::cast<
-          llvm::BlockAddress>(MarkerCall->getArgOperand(0));
-        using llvm::BasicBlock;
-        BasicBlock *ScopeCloserBB = ScopeCloserBlockAddress->getBasicBlock();
+    if (BBIt != BB->rend()) {
+      llvm::Instruction &SecondLastInst = *BBIt;
+      if (auto *MarkerCall = llvm::dyn_cast<llvm::CallInst>(&SecondLastInst)) {
+        if (MarkerCall->getCalledFunction() == ScopeCloserMarkerFunction) {
+          llvm::BlockAddress *ScopeCloserBlockAddress = llvm::cast<
+            llvm::BlockAddress>(MarkerCall->getArgOperand(0));
+          using llvm::BasicBlock;
+          BasicBlock *ScopeCloserBB = ScopeCloserBlockAddress->getBasicBlock();
 
-        return ScopeCloserBB;
+          return ScopeCloserBB;
+        }
       }
     }
 

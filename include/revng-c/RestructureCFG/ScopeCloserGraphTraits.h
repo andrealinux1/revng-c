@@ -9,6 +9,22 @@
 
 #include "revng-c/RestructureCFG/GeneratorIterator.h"
 
+inline cppcoro::generator<llvm::BasicBlock *> increment(llvm::BasicBlock *BB) {
+
+  //  First of all, we return all the standard successors of `BB`
+  for (auto *Successor : successors(BB)) {
+    co_yield Successor;
+  }
+
+  // We then move to returning the additional successor represented by the
+  // `ScopeCloser` edge, if present at all
+  ScopeCloserMarkerBuilder SCMBuilder(BB->getParent());
+  llvm::BasicBlock *ScopeCloserTarget = SCMBuilder.getScopeCloserTarget(BB);
+  if (ScopeCloserTarget) {
+    co_yield ScopeCloserTarget;
+  }
+}
+
 namespace llvm {
 
 /// This class is used as a marker class to tell the graph iterator to treat the

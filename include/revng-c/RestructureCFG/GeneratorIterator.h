@@ -12,20 +12,6 @@
 
 #include "revng-c/RestructureCFG/ScopeCloserUtils.h"
 
-inline cppcoro::generator<llvm::BasicBlock *> increment(llvm::BasicBlock *BB) {
-
-  //  First of all, we return all the standard successors of `BB`
-  for (auto *Successor : successors(BB)) {
-    co_yield Successor;
-  }
-
-  // We then move to returning the additional successor represented by the
-  // `ScopeCloser` edge
-  // ScopeCloserMarkerBuilder SCMBuilder(BB->getParent());
-  // llvm::BasicBlock *ScopeCloserTarget = SCMBuilder.getScopeCloserTarget(BB);
-  // co_yield ScopeCloserTarget;
-}
-
 template<typename T>
 class GeneratorIterator {
 public:
