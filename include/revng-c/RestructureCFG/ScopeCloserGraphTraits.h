@@ -6,6 +6,7 @@
 
 #include "llvm/ADT/GraphTraits.h"
 #include "llvm/IR/BasicBlock.h"
+#include "llvm/Support/DOTGraphTraits.h"
 
 #include "revng-c/RestructureCFG/GeneratorIterator.h"
 
@@ -71,4 +72,17 @@ public:
 public:
   // We infer the `ChildIteratorType` directly from the `child_begin` method
   using ChildIteratorType = decltype(child_begin(NodeRef{ nullptr }));
+
+  // Define the iterator for nodes (BasicBlocks)
+  using nodes_iterator = llvm::Function::iterator;
 };
+
+#if 1
+// Explicitly instantiate `DOTGraphTraits` for `llvm::Dashed<llvm::BasicBlock
+// *>`
+template<>
+struct llvm::DOTGraphTraits<llvm::Dashed<llvm::BasicBlock *>>
+  : public llvm::DefaultDOTGraphTraits {
+  using llvm::DefaultDOTGraphTraits::DefaultDOTGraphTraits;
+};
+#endif
