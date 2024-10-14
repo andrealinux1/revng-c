@@ -89,6 +89,7 @@ public:
       // Create the new `BasicBlock` representing the conditional inserted by
       // the IDB process
       llvm::BasicBlock *Conditional = DivergentEdge.first;
+      llvm::BasicBlock *Successor = DivergentEdge.second;
       llvm::LLVMContext &Context = getContext(Conditional);
       llvm::BasicBlock
         *NewConditional = BasicBlock::Create(Context,
@@ -102,7 +103,79 @@ public:
 
       llvm::IRBuilder<> Builder(NewConditional);
       Builder.Insert(ClonedTerminator);
+
+      // We need to connect the `NewConditional` to the original successor of
+      // the divergent edge
+
+#if 0
+      auto ConstantLambda = [&Successor](llvm::BasicBlock *BB) {
+        return BB == Successor;
+      };
+      moveEdgesFromAToB(Conditional, NewConditional, ConstantLambda);
+#endif
+
+      moveSuccFromAToB(Conditional, NewConditional, Successor);
     }
+  }
+
+  /// Helper function that is used to move a specific outgoing edge `A -> Succ`
+  /// in order to become `B -> Succ`. In this first implementation, we don't
+  /// clean up the terminator where `Succ` is not reachable anymore, and we rely
+  /// on, e.g., `simplifycfg` to take care of that.
+  /// TODO: verify that in the situation described above, no simplification in
+  ///       turns can lead to inconsistent situations (since the conditional and
+  ///       the new cloned conditional created by IDB, need to insist on the
+  ///       same condition, and these may become out of sync is IR
+  ///       simplifications happens in the middle).
+  /// \param A The source basic block.
+  /// \param B The target basic block.
+  /// \param Succ The successor being moved.
+  void moveSuccFromAToB(BasicBlock *A, BasicBlock *B, BasicBlock *Succ) {
+
+    // 1) We remove from the `TerminatorInst` ending `A`, the `Succ`
+    //    `BasicBlock`. We do this by substiting `Succ` with `nullptr`. We will
+    //    later take care of fixing the `nullptr` occurencies either with the
+    //    `simplifycfg` pass or an ulterior custom simplification
+    Instruction *TerminatorA = A->getTerminator();
+    TerminatorA->replaceSuccessorWith(A, nullptr);
+
+    // 2) We redirect all the edges incoming into node `A`, in order to reach
+    //    `B` instead
+
+    // We need to save the predecessors, to avoid the invalidation of the
+    // iterators
+    llvm::SmallVector<BasicBlock *> Predecessors;
+    for (BasicBlock *Predecessor : predecessors(A)) {
+      Predecessors.push_back(Predecessor);
+    }
+
+    for (BasicBlock *Predecessor : Predecessors) {
+      Instruction *Terminator = Predecessor->getTerminator();
+      Terminator->replaceSuccessorWith(A, B);
+    }
+
+    // 3) We also need to connect `B` with `Succ`, with a conditional branch
+    //    using the same condition present in `A`
+    IRBuilder<> BuilderB(B);
+    Instruction *TerminatorB = TerminatorA->clone();
+    BuilderB.Insert(TerminatorB);
+
+    // 4) In the cloned `TerminatorB`, we leave alive only the edges reaching
+    //    `Succ`
+    llvm::SmallVector<BasicBlock *> Successors;
+    for (BasicBlock *Successor : successors(B)) {
+      if (Successor != Succ) {
+        Successors.push_back(Successor);
+      }
+    }
+
+    for (BasicBlock *Successor : Successors) {
+      TerminatorB->replaceSuccessorWith(Successor, nullptr);
+    }
+
+    // 5) At this stage, we need to connect `B` to `A`, and we do that by using
+    //    the empty slot left by the above substitution
+    TerminatorB->replaceSuccessorWith(nullptr, A);
   }
 
   /// Helper function that moves some outgoing edges from basic block A to B.
@@ -122,12 +195,12 @@ public:
     }
 
     // We will gather all successors we want to move from A to B
-    std::vector<BasicBlock *> toMove;
+    std::vector<BasicBlock *> ToMove;
 
     for (unsigned i = 0; i < TerminatorA->getNumSuccessors(); ++i) {
       BasicBlock *Succ = TerminatorA->getSuccessor(i);
       if (shouldMoveEdge(Succ)) {
-        toMove.push_back(Succ); // Mark this edge to be moved
+        ToMove.push_back(Succ); // Mark this edge to be moved
       }
     }
 
@@ -140,7 +213,7 @@ public:
         BasicBlock *ThenBB = BI->getSuccessor(0);
         BasicBlock *ElseBB = BI->getSuccessor(1);
 
-        for (BasicBlock *Succ : toMove) {
+        for (BasicBlock *Succ : ToMove) {
           if (Succ == ThenBB) {
             // Replace the condition so that it branches directly to the ElseBB
             BI->setCondition(ConstantInt::getTrue(BI->getContext()));
@@ -154,7 +227,7 @@ public:
         }
       } else {
         // For unconditional branches, we simply replace the successor.
-        for (BasicBlock *Succ : toMove) {
+        for (BasicBlock *Succ : ToMove) {
           if (BI->getSuccessor(0) == Succ) {
             BI->setSuccessor(0, nullptr);
           }
@@ -162,10 +235,22 @@ public:
       }
     } else if (SwitchInst *SI = dyn_cast<SwitchInst>(TerminatorA)) {
       // For SwitchInst, we remove the outgoing edges from A
-      for (BasicBlock *Succ : toMove) {
+      for (BasicBlock *Succ : ToMove) {
+
+#if 0
         for (auto Case : SI->cases()) {
           if (Case.getCaseSuccessor() == Succ) {
             SI->removeCase(Case);
+          }
+        }
+#endif
+
+        for (SwitchInst::CaseIt CaseIt = SI->case_begin(),
+                                CaseItEnd = SI->case_end();
+             CaseIt != CaseItEnd;
+             ++CaseIt) {
+          if (CaseIt->getCaseSuccessor() == Succ) {
+            SI->removeCase(CaseIt);
           }
         }
       }
@@ -186,11 +271,11 @@ public:
     if (BranchInst *BI = dyn_cast<BranchInst>(TerminatorB)) {
       if (!BI->isConditional()) {
         // Create a new conditional branch for multiple successors
-        BasicBlock *NewSucc = toMove[0]; // The first successor to move
-        for (unsigned i = 1; i < toMove.size(); ++i) {
+        BasicBlock *NewSucc = ToMove[0]; // The first successor to move
+        for (unsigned i = 1; i < ToMove.size(); ++i) {
           // For each new successor, create a conditional branch to NewSucc or
           // the next successor
-          BasicBlock *NextSucc = toMove[i];
+          BasicBlock *NextSucc = ToMove[i];
           BI = BuilderB.CreateCondBr(ConstantInt::getTrue(BI->getContext()),
                                      NewSucc,
                                      NextSucc);
@@ -198,19 +283,33 @@ public:
         }
       }
     } else if (SwitchInst *SI = dyn_cast<SwitchInst>(TerminatorB)) {
-      for (BasicBlock *Succ : toMove) {
+      for (BasicBlock *Succ : ToMove) {
+#if 1
+        // TODO: We should double check that the following `llvm::cast` is
+        //       always permitted, and that the `llvm::Type` for the
+        //       `SwitchInst` is always a `llvm::ConstantInt`
+        SI->addCase(llvm::cast<ConstantInt>(ConstantInt::get(SI->getCondition()
+                                                               ->getType(),
+                                                             SI->getNumCases()
+                                                               + 1)),
+                    Succ);
+#endif
+
+#if 0
         SI->addCase(ConstantInt::get(SI->getCondition()->getType(),
                                      SI->getNumCases() + 1),
                     Succ);
+#endif
       }
     } else {
       // If the terminator of B is not compatible (e.g., `ret void`), we replace
       // it
       TerminatorB->eraseFromParent();
-      BranchInst *NewBranch = BuilderB.CreateBr(toMove[0]);
+      BuilderB.CreateBr(ToMove[0]);
+      // BranchInst *NewBranch = BuilderB.CreateBr(ToMove[0]);
 
-      for (unsigned i = 1; i < toMove.size(); ++i) {
-        BuilderB.CreateBr(toMove[i]);
+      for (unsigned i = 1; i < ToMove.size(); ++i) {
+        BuilderB.CreateBr(ToMove[i]);
       }
     }
   }
