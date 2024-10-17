@@ -137,7 +137,7 @@ public:
     //    later take care of fixing the `nullptr` occurencies either with the
     //    `simplifycfg` pass or an ulterior custom simplification
     Instruction *TerminatorA = A->getTerminator();
-    TerminatorA->replaceSuccessorWith(A, nullptr);
+    TerminatorA->replaceSuccessorWith(Succ, nullptr);
 
     // 2) We redirect all the edges incoming into node `A`, in order to reach
     //    `B` instead
