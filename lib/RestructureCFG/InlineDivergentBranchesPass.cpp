@@ -41,6 +41,7 @@ public:
       }
     }
 
+#if 0
     // Test iteration which uses `llvm::depth_first` on the `llvm::Dashed` graph
     llvm::BasicBlock *EntryBlock = &F.getEntryBlock();
     for (llvm::BasicBlock *BB : llvm::depth_first(llvm::Dashed(EntryBlock))) {
@@ -53,7 +54,9 @@ public:
         dbg << "  " << (*Succ)->getName().str() << "\n";
       }
     }
+#endif
 
+#if 1
     for (llvm::BasicBlock &BB : F) {
       dbg << "Block " << BB.getName().str() << " scope graph successors:\n";
       using ScopeGraph = llvm::GraphTraits<llvm::Dashed<llvm::BasicBlock *>>;
@@ -63,6 +66,7 @@ public:
         dbg << " " << (*Succ)->getName().str() << "\n";
       }
     }
+#endif
 
 #if 0
     // TODO: solve the error here. It seems strange that it needs the
@@ -77,6 +81,18 @@ public:
     // branches
     using EdgeDescriptor = revng::detail::EdgeDescriptor<llvm::BasicBlock *>;
     llvm::SmallVector<EdgeDescriptor> DivergentEdges;
+
+    // TODO: remove this: manually add the `C->E` edge in order to test out the
+    //       `nullptr` blanketing
+    for (BasicBlock &BB : F) {
+      for (BasicBlock *Succ : successors(&BB)) {
+        if (BB.getName().startswith("block_c")
+            and Succ->getName().startswith("block_e")) {
+          auto DivergentEdge = EdgeDescriptor(&BB, Succ);
+          DivergentEdges.push_back(DivergentEdge);
+        }
+      }
+    }
 
     // TODO: Understand if it is correct to collect all the divergent exits and
     //       then apply the transformation all together, or if it needs to be
@@ -98,11 +114,11 @@ public:
 
       // The new conditional will need to operate on the same condition of the
       // original block
-      llvm::Instruction *Terminator = Conditional->getTerminator();
-      llvm::Instruction *ClonedTerminator = Terminator->clone();
+      // llvm::Instruction *Terminator = Conditional->getTerminator();
+      // llvm::Instruction *ClonedTerminator = Terminator->clone();
 
-      llvm::IRBuilder<> Builder(NewConditional);
-      Builder.Insert(ClonedTerminator);
+      // llvm::IRBuilder<> Builder(NewConditional);
+      // Builder.Insert(ClonedTerminator);
 
       // We need to connect the `NewConditional` to the original successor of
       // the divergent edge
@@ -114,8 +130,35 @@ public:
       moveEdgesFromAToB(Conditional, NewConditional, ConstantLambda);
 #endif
 
-      moveSuccFromAToB(Conditional, NewConditional, Successor);
+      moveSuccFromAToB2(Conditional, NewConditional, Successor);
     }
+
+    // TODO: remove this: print the function as debug
+    // F.viewCFG();
+
+    // TODO: remove this debug printing, since we are not interested in printing
+    //       the content of the body of a `BasicBlock`
+#if 1
+    for (llvm::BasicBlock &BB : F) {
+      dbg << "Block " << BB.getName().str() << " scope graph successors:\n";
+      using ScopeGraph = llvm::GraphTraits<llvm::Dashed<llvm::BasicBlock *>>;
+      for (auto Succ = ScopeGraph::child_begin(&BB);
+           Succ != ScopeGraph::child_end(&BB);
+           ++Succ) {
+        dbg << " " << (*Succ)->getName().str() << "\n";
+      }
+    }
+#endif
+
+    // Serialize the `ScopeGraph` for debugging purposes
+    // llvm::Dashed<llvm::BasicBlock *> ScopeGraph(&F.getEntryBlock());
+    llvm::Dashed<llvm::Function *> ScopeGraph(&F);
+    // llvm::WriteGraph(ScopeGraph, "ScopeGraph.dot");
+    // llvm::ViewGraph(&ScopeGraph, "ScopeGraph");
+    // llvm::Inverse<llvm::Function *> InverseGraph(&F);
+    // llvm::ViewGraph(InverseGraph, "InverseGraph");
+    // llvm::ViewGraph<llvm::Dashed<llvm::Function *>>(ScopeGraph,
+    // "ScopeGraph");
   }
 
   /// Helper function that is used to move a specific outgoing edge `A -> Succ`
@@ -176,6 +219,95 @@ public:
     // 5) At this stage, we need to connect `B` to `A`, and we do that by using
     //    the empty slot left by the above substitution
     TerminatorB->replaceSuccessorWith(nullptr, A);
+  }
+
+  void moveSuccFromAToB2(BasicBlock *A, BasicBlock *B, BasicBlock *Succ) {
+
+    // TODO: We need to implement the transformation, by reverting what it is done, and by leaving the old living conditional as the first node that is encountered following the execution of the control flow coming from the function entry node
+
+    // TODO: note that the `BasicBlock` `B` has been already create in the caller, even though is empty at this stage. We may need to factor also the creation out here in the new form.
+
+    // We verify that the `BasicBlock` `B` is empty before we start the changes
+    // to the LLVMIR
+    revng_assert(B->empty());
+
+    // 1) We clone the terminator already present in `BasicBlock` `A`, so that
+    //    a superset of the correct successors are already connected
+    Instruction *TerminatorA = A->getTerminator();
+    Instruction *TerminatorB = TerminatorA->clone();
+
+    IRBuilder<> BuilderB(B);
+    BuilderB.Insert(TerminatorB);
+
+    // 2) We remove from the `TerminatorInst` ending `A`, all the edges that do
+    //    not target `Succ` (they will be added to the `TerminatorInst` ending
+    //    `B`)
+    llvm::SmallVector<BasicBlock *> ASuccessors;
+    for (BasicBlock *Successor : successors(A)) {
+      if (Successor != Succ) {
+        ASuccessors.push_back(Successor);
+      }
+    }
+
+    for (BasicBlock *Successor : ASuccessors) {
+      TerminatorA->replaceSuccessorWith(Successor, nullptr);
+    }
+
+    // 3) We remove from the `TerminatorInst` ending `B`, all the edges that
+    //    target `Succ`, since `Succ` will be reached from `BasicBlock` `A`
+    llvm::SmallVector<BasicBlock *> BSuccessors;
+    for (BasicBlock *Successor : successors(B)) {
+      if (Successor == Succ) {
+        BSuccessors.push_back(Successor);
+      }
+    }
+
+    for (BasicBlock *Successor : BSuccessors) {
+      TerminatorB->replaceSuccessorWith(Successor, nullptr);
+    }
+
+    // 4) During step 3, we left around some empty slots in the `TerminatorInst`
+    //    of `B` (containing a nullptr). Such slots should not be connected to
+    //    anything, and therefore we replace it with the first already present
+    //    successor. We then rely on `simplifycfg`, or a customly rolled
+    //    optimization pass
+#if 0
+    llvm::BasicBlock *FirstSuccessor;
+    for (BasicBlock *Successor : BSuccessors) {
+      if (Successor != nullptr) {
+        FirstSuccessor = Successor;
+      }
+    }
+    TerminatorB->replaceSuccessorWith(nullptr, FirstSuccessor);
+#endif
+
+#if 1
+    BasicBlock *FirstSuccessor;
+    for (BasicBlock *Successor : successors(B)) {
+      if (Successor != nullptr) {
+        FirstSuccessor = Successor;
+      }
+    }
+    TerminatorB->replaceSuccessorWith(nullptr, FirstSuccessor);
+#endif
+
+    // 5) We connect `BasicBlock` `A` to `BasicBlock` `B` using the first slot
+    //    in the `TerminatorInst` of `A` that connected all the other successors
+    //    expect `Succ`
+    TerminatorA->replaceSuccessorWith(nullptr, B);
+
+    // 6) We add a `ScopeCloser` edge, which connects the divergent part of the
+    //    `CFG` with the "main" one, so that a single post dominator tree can be
+    //    computed
+
+    // TODO: we rely, for this first implementation, on the assumption that the `ScopeCloser` edge starts from
+    Instruction *TerminatorSucc = Succ->getTerminator();
+    revng_assert(TerminatorSucc->getNumSuccessors() == 0);
+
+    // We insert the `ScopeCloser` edge at the end of the `Succ` block
+    ScopeCloserMarkerBuilder SCMBuilder(&F);
+    SCMBuilder.setInsertPoint(Succ);
+    SCMBuilder.insertScopeCloserTarget(B);
   }
 
   /// Helper function that moves some outgoing edges from basic block A to B.

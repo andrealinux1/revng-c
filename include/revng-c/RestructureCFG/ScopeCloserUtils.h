@@ -11,12 +11,13 @@
 
 #include "revng/Support/IRHelpers.h"
 
-// TODO: implement the builder class for the markers used to represent scope
-//       closer edges
-
-// We keep a globale pointer for the `ScopeCloserMarkerFunction` so we can
-// dynamically add it in the module if a version is not already present
+// We keep a global pointer for the `ScopeCloserMarkerFunction` so we can
+// dynamically add it in the module if an instance is not already present
 llvm::Function *ScopeCloserMarkerFunction = nullptr;
+
+// We keep a global pointer for the `GotoTargetMarkerFunction` so we can
+// dynamically add it in the module if an instance is not already present
+llvm::Function *GotoTargetMarkerFunction = nullptr;
 
 /// This is a helper class used to create the markers in the basic blocks needed
 /// to handle the dashed edges. Its role should be similar somewhat to the
@@ -100,5 +101,94 @@ public:
     auto *BasicBlockAddressTarget = llvm::BlockAddress::get(BasicBlockTarget);
     revng_assert(BasicBlockAddressTarget);
     Builder.CreateCall(ScopeCloserMarkerFunction, BasicBlockAddressTarget);
+  }
+};
+
+/// This is a helper class used to create the markers in the basic blocks needed
+/// to handle the dashed edges. Its role should be similar somewhat to the
+/// `llvm::IRBuilder` role.
+class GotoTargetMarkerBuilder {
+private:
+  llvm::BasicBlock *BB;
+
+  // TODO: it would be nice if the pointer to the `GotoTargetMarkerBuilder`
+  //       would stored locally in this builder, or retrieved through the
+  //       `FunctionTag` machinery provided by `revng`, instead of having a
+  //       global object like now
+  // llvm::Function *GotoTargetMarkerBuilder;
+
+public:
+  GotoTargetMarkerBuilder(llvm::Function *F) {
+
+    if (GotoTargetMarkerFunction) {
+      return;
+    }
+
+    // Create the `GotoTarget` marker function definition, that will be needed
+    // by the inserted markers
+    llvm::LLVMContext &C = getContext(F);
+    llvm::Module *M = getModule(F);
+    llvm::Type *BlockAddressTy = llvm::Type::getInt8PtrTy(C);
+    auto *FT = llvm::FunctionType::get(llvm::Type::getVoidTy(C),
+                                       { BlockAddressTy },
+                                       false);
+
+    using llvm::Function;
+    using llvm::GlobalValue;
+    ScopeCloserMarkerFunction = Function::Create(FT,
+                                                 GlobalValue::ExternalLinkage,
+                                                 "goto_target",
+                                                 M);
+  }
+
+public:
+  // Set the insertion point of the `GTMBuilder`
+  void setInsertPoint(llvm::BasicBlock *NewBB) { BB = NewBB; }
+
+  // Retrieve the `GotoTarget` BasicBlock target
+  llvm::BasicBlock *getGotoTarget(llvm::BasicBlock *BB) {
+
+    // We must have an insertion point
+    revng_assert(BB);
+
+    // Find the last but two instruction, where the marker containing the target
+    // `BasicBlockAddress` is stored
+    auto BBIt = BB->rbegin();
+    ++BBIt;
+    ++BBIt;
+
+    if (BBIt != BB->rend()) {
+      llvm::Instruction &ThirdLastInst = *BBIt;
+      if (auto *MarkerCall = llvm::dyn_cast<llvm::CallInst>(&ThirdLastInst)) {
+        if (MarkerCall->getCalledFunction() == GotoTargetMarkerFunction) {
+          llvm::BlockAddress *GotoTargetBlockAddress = llvm::cast<
+            llvm::BlockAddress>(MarkerCall->getArgOperand(0));
+          using llvm::BasicBlock;
+          BasicBlock *GotoTargetBB = GotoTargetBlockAddress->getBasicBlock();
+
+          return GotoTargetBB;
+        }
+      }
+    }
+
+    return nullptr;
+  }
+
+  void insertGotoTarget(llvm::BasicBlock *BasicBlockTarget) {
+
+    // We must have an insertion point
+    revng_assert(BB);
+
+    auto BBIt = BB->rbegin();
+    ++BBIt;
+    revng_assert(BBIt != BB->rend());
+
+    // Find the terminator instruction in the `BasicBlock` where we want to
+    // store the `GotoTarget` marker
+    llvm::IRBuilder<> Builder(BB);
+    Builder.SetInsertPoint(&*BBIt);
+    auto *BasicBlockAddressTarget = llvm::BlockAddress::get(BasicBlockTarget);
+    revng_assert(BasicBlockAddressTarget);
+    Builder.CreateCall(GotoTargetMarkerFunction, BasicBlockAddressTarget);
   }
 };

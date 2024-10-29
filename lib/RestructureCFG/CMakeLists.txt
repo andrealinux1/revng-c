@@ -10,7 +10,7 @@ revng_add_analyses_library(
   ASTTree.cpp
   BasicBlockNode.cpp
   BeautifyGHAST.cpp
-  EnforceSingleExitPass.cpp
+  # EnforceSingleExitPass.cpp
   ExprNode.cpp
   FallThroughScopeAnalysis.cpp
   GenericRegionInfo.cpp
